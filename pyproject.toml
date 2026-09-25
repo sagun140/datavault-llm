@@ -1,0 +1,13 @@
+[project]
+name = "datavault-llm"
+version = "0.1.0"
+description = "A grounded QA substrate: Wikipedia -> Data Vault 2.0 -> answers that cannot be unsupported"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+dvl = "dvl.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
