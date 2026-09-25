@@ -11,11 +11,17 @@ an LLM composer later. The guarantee comes from the check, not from the writer.
 import re
 
 # The only words a composer may introduce that are not in the cited facts.
+# Closed class only: determiners, copulas, prepositions, conjunctions, pronouns.
+# Nothing here can carry a fact. A composer may use these and nothing else of its
+# own invention; every other word must come from the vault.
 SCAFFOLD = {
-    "the", "a", "an", "is", "are", "was", "were", "of", "to", "in", "on", "at",
-    "and", "or", "as", "by", "for", "with", "its", "it", "this", "that", "has",
-    "have", "had", "according", "vault", "recorded", "records", "per", "from",
-    "no", "not", "answer", "found", "s",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "of", "to",
+    "in", "on", "at", "and", "or", "as", "by", "for", "with", "its", "it",
+    "this", "that", "has", "have", "had", "per", "from", "no", "not", "s",
+    # answer-frame words, not claims about the world
+    "according", "vault", "recorded", "records", "answer", "holds", "hold",
+    "related", "facts", "fact", "directly", "closest", "slots", "does", "will",
+    "there", "which", "tracked", "these", "updates", "superseded", "rev",
 }
 
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -33,6 +39,10 @@ def ungrounded_tokens(answer: str, cited_facts: list[dict]) -> list[str]:
         supported.update(tokens(f["subject"]))
         supported.update(tokens(f["predicate"]))
         supported.update(tokens(f["value"]))
+        # The predicate's declared verbalization, stored in the vault and shown
+        # with the citation, so every added word is auditable rather than free.
+        for word in f.get("lexicalization", []):
+            supported.update(tokens(word))
 
     bad = []
     for tok in tokens(_CITATION.sub(" ", answer)):

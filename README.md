@@ -41,6 +41,45 @@ It also distinguishes **"I don't have that"** from **"here are related facts"**.
 a CTO the vault has never seen returns founders and key people *explicitly labelled as
 not an answer*, rather than letting adjacent truths pose as one.
 
+## Sentences are walked out of the graph
+
+A link is already a proposition: `hub(subject) -> predicate -> satellite(value)` maps
+onto subject -> verb -> object. So sentences are not looked up and formatted, they are
+*realized from the vault topology*. Several links out of one hub fuse into one clause:
+
+```
+$ dvl describe Anthropic
+Anthropic is an American artificial intelligence (AI) public benefit corporation
+headquartered in San Francisco, California. [1] Its type is Public benefit corporation
+and Private. [2] It was founded on 2021-01-26 by Dario Amodei, Daniela Amodei, Jared
+Kaplan, Jack Clark, Chris Olah, Ben Mann, Sam McCandlish, and Tom Brown. [4] It is
+located in 500 Howard Street and San Francisco, California, U.S. and its industry is
+Artificial intelligence. [6] Its products are Claude, Claude Code, Claude Cowork, and
+Bun. [7] ...
+```
+
+`founded` + `founders` are two links on one hub; the founding *frame* fuses them into a
+single clause with two objects. Lists are coordinated (`;` -> `, and`), and the subject
+is pronominalized after first mention. All of it is closed-class machinery.
+
+### Why nothing can be invented
+
+The claim rests on one invariant, enforced over every template by
+`tests/test_grammar.py`:
+
+> Every word in a clause template is either **(a)** a closed-class function word in
+> `verify.SCAFFOLD` — determiners, copulas, prepositions, conjunctions, pronouns — or
+> **(b)** a morphological variant of the predicate's own business key.
+
+Content words therefore have exactly two doors into a sentence:
+`hub_entity.business_key` and `sat_statement.value`. Adding a template that smuggles in a
+content word fails the build — which is how the `birth_date` template was caught trying
+to use "born", a word derivable from no vault key.
+
+Whatever a template does contribute under (b) is reported with the citation as that
+predicate's `lexicalization`, so every word that did not come from a hub or a satellite
+is auditable.
+
 ## Why Data Vault, specifically
 
 Because the requirement was "if the info updates, start tracking that too" — and that is
@@ -107,9 +146,10 @@ so the graph is intact.
 - **Retrieval is lexical**, with a hand-written synonym table. It has no notion of
   paraphrase; an unmapped question word simply fails to retrieve, and it refuses. That
   fails safe, but it fails often.
-- **Answers read like a database, not like prose.** That is the current cost of the
-  grounding gate. Attaching an LLM composer behind `assert_grounded` is the intended next
-  step, and the point of building the gate first.
+- **The realizer is template-driven, not learned.** Clause patterns are hand-authored per
+  predicate (17 of them). A predicate with no template produces no sentence rather than a
+  guess, so coverage of the grammar bounds coverage of the answers.
+  An LLM composer behind `assert_grounded` remains the intended next step for fluency.
 - **Fidelity is only as good as the source.** The vault guarantees a claim traces to a
   Wikipedia revision. It does not make Wikipedia correct.
 - **`object_entity_hk` is unreliable.** It records the *first* wikilink in a value, which

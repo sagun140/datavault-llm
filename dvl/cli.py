@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+from .describe import describe_entity
 from .extract import extract
 from .query import ask
 from .vault import Vault
@@ -30,6 +31,12 @@ def cmd_ask(args):
     finally:
         vault.close()
     return 0
+
+
+def cmd_describe(args):
+    vault = Vault(args.db)
+    print(describe_entity(vault, " ".join(args.entity)).render())
+    vault.close()
 
 
 def cmd_history(args):
@@ -67,6 +74,10 @@ def main(argv=None):
     a = sub.add_parser("ask", help="ask the vault a question")
     a.add_argument("question", nargs="+")
     a.set_defaults(func=cmd_ask)
+
+    d = sub.add_parser("describe", help="generate a description by walking an entity's links")
+    d.add_argument("entity", nargs="+")
+    d.set_defaults(func=cmd_describe)
 
     h = sub.add_parser("history", help="show values the vault has superseded")
     h.add_argument("subject", nargs="?")

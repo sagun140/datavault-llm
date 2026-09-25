@@ -9,6 +9,7 @@ system refuses.
 import re
 from dataclasses import dataclass, field
 
+from .grammar import CLAUSES, describe, lexicalization
 from .vault import Vault
 from .verify import assert_grounded, tokens
 
@@ -147,13 +148,20 @@ def ask(vault: Vault, question: str, top_k: int = 3) -> Answer:
     # than let adjacent truths pose as the answer.
     indirect = all(h.lexical == 0 for h in hits)
 
-    citations = [s.row for s in hits]
-    sentences = [
-        f"{c['subject']} is a {c['value']}." if c["predicate"] == "is_a"
-        else f"{c['subject']} {_readable(c['predicate'])}: {c['value']}."
-        for c in citations
-    ]
-    text = " ".join(f"{s} [{i}]" for i, s in enumerate(sentences, 1))
+    # Compose by walking the graph: the retrieved links become clauses, and
+    # co-occurring links on the same hub fuse into one sentence.
+    subject = hits[0].row["subject"]
+    facts = {h.row["predicate"]: h.row["value"] for h in hits}
+    by_predicate = {h.row["predicate"]: h.row for h in hits}
+
+    citations, parts = [], []
+    for sentence, predicates in describe(subject, facts):
+        for p in predicates:
+            row = dict(by_predicate[p])
+            row["lexicalization"] = lexicalization(p, CLAUSES.get(p, ""))
+            citations.append(row)
+        parts.append(f"{sentence} [{len(citations)}]")
+    text = " ".join(parts)
     assert_grounded(text, citations)  # raises rather than emit an unsupported claim
 
     if indirect:
