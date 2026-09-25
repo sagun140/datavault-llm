@@ -130,7 +130,9 @@ def clean(text: str) -> str:
 
 
 def _first_wikilink(raw: str) -> str | None:
-    m = re.search(r"\[\[([^\]|]+)", raw)
+    """First wikilink in the value proper -- never one from inside a <ref>, whose
+    links belong to the citation (a publisher, an author) and not to the fact."""
+    m = re.search(r"\[\[([^\]|]+)", _REF.sub("", raw))
     return m.group(1).strip() if m else None
 
 

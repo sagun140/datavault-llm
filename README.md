@@ -112,6 +112,12 @@ so the graph is intact.
   step, and the point of building the gate first.
 - **Fidelity is only as good as the source.** The vault guarantees a claim traces to a
   Wikipedia revision. It does not make Wikipedia correct.
+- **`object_entity_hk` is unreliable.** It records the *first* wikilink in a value, which
+  is often not the value's referent: `revenue` links to `US$`, `key_people` to
+  `Chief executive officer` rather than to Dario Amodei. The answer path reads `value`
+  and never this column, so answers are unaffected — but the graph edges are wrong, and
+  they pollute `hub_entity` with non-entities. The real fix is a multi-valued
+  `link_reference` table rather than one arbitrary link per statement.
 - **Multi-value fields are single strings** (`"Dario Amodei; Daniela Amodei"`), not
   separate facts, so you cannot yet ask about one founder.
 
