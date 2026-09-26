@@ -39,6 +39,28 @@ def cmd_describe(args):
     vault.close()
 
 
+def cmd_reconstruct(args):
+    """Rebuild the document's sentences from hub_pattern + link_slot alone."""
+    vault = Vault(args.db)
+    rows = vault.reconstruct(" ".join(args.entity))
+    if not rows:
+        print("No sentences stored for that entity.")
+    exact = sum(r["exact"] for r in rows)
+    for r in rows:
+        if args.verbose:
+            print(f"\n[{r['sequence']}] pattern: {r['pattern']}")
+            print(f"     slots  : {r['fillers']}")
+            print(f"     rebuilt: {r['rebuilt']}")
+            if not r["exact"]:
+                print(f"     ORIGINAL DIFFERS: {r['original']}")
+        else:
+            print(("  " if r["exact"] else "! ") + r["rebuilt"])
+    if rows:
+        print(f"\n{exact}/{len(rows)} sentences rebuilt exactly "
+              f"({100 * exact / len(rows):.1f}%)")
+    vault.close()
+
+
 def cmd_history(args):
     vault = Vault(args.db)
     rows = vault.history(args.subject)
@@ -78,6 +100,11 @@ def main(argv=None):
     d = sub.add_parser("describe", help="generate a description by walking an entity's links")
     d.add_argument("entity", nargs="+")
     d.set_defaults(func=cmd_describe)
+
+    r = sub.add_parser("reconstruct", help="rebuild stored sentences from vault constructs")
+    r.add_argument("entity", nargs="+")
+    r.add_argument("-v", "--verbose", action="store_true", help="show pattern and slots")
+    r.set_defaults(func=cmd_reconstruct)
 
     h = sub.add_parser("history", help="show values the vault has superseded")
     h.add_argument("subject", nargs="?")

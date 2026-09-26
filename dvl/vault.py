@@ -16,8 +16,12 @@ import hashlib
 import sqlite3
 from dataclasses import dataclass
 
-from .extract import Fact
+from .extract import Fact, clean
+from .sentence import RoundTripError, construct, roundtrip, sentences
 from .wiki import Revision
+
+SENTENCE_SCHEMA = ""  # defined at end of module; assigned below
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS hub_entity (
@@ -89,6 +93,8 @@ class LoadReport:
     inserted: int
     changed: int
     unchanged: int
+    sentences_stored: int = 0
+    sentences_rejected: int = 0
 
     def __str__(self) -> str:
         return (
@@ -97,7 +103,9 @@ class LoadReport:
             f"  new statements  : {self.inserted}\n"
             f"  changed values  : {self.changed}\n"
             f"  unchanged       : {self.unchanged}\n"
-            f"  rejected (no verbatim source span): {self.rejected_no_provenance}"
+            f"  rejected (no verbatim source span): {self.rejected_no_provenance}\n"
+            f"  sentences stored: {self.sentences_stored}"
+            f"  (rejected, not regenerable: {self.sentences_rejected})"
         )
 
 
@@ -106,6 +114,7 @@ class Vault:
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self.db.executescript(SENTENCE_SCHEMA)
 
     def close(self) -> None:
         self.db.close()
@@ -170,6 +179,7 @@ class Vault:
             )
             setattr(rep, outcome, getattr(rep, outcome) + 1)
 
+        rep.sentences_stored, rep.sentences_rejected = self._load_sentences(rev)
         self.db.commit()
         return rep
 
@@ -251,3 +261,140 @@ class Vault:
             "current (open) facts": one("SELECT count(*) FROM sat_statement WHERE load_end_ts IS NULL"),
             "superseded facts": one("SELECT count(*) FROM sat_statement WHERE load_end_ts IS NOT NULL"),
         }
+
+
+# --- sentence-level storage: patterns, slots, utterances ---------------------
+
+SENTENCE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS hub_pattern (
+    pattern_hk   TEXT PRIMARY KEY,
+    business_key TEXT NOT NULL UNIQUE,   -- the frame, e.g. "{0} is an American {1}."
+    slot_count   INTEGER NOT NULL,
+    load_ts      TEXT NOT NULL,
+    record_source TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS link_utterance (
+    utterance_hk TEXT PRIMARY KEY,
+    doc_hk       TEXT NOT NULL REFERENCES hub_entity(entity_hk),
+    pattern_hk   TEXT NOT NULL REFERENCES hub_pattern(pattern_hk),
+    sequence     INTEGER NOT NULL,
+    load_ts      TEXT NOT NULL,
+    record_source TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS link_slot (
+    utterance_hk TEXT NOT NULL REFERENCES link_utterance(utterance_hk),
+    position     INTEGER NOT NULL,
+    entity_hk    TEXT NOT NULL REFERENCES hub_entity(entity_hk),
+    -- How this mention was written. The hub holds identity ("Artificial
+    -- intelligence"); a mention may render it differently ("artificial
+    -- intelligence"), and the sentence needs the form actually used.
+    surface      TEXT NOT NULL,
+    PRIMARY KEY (utterance_hk, position)
+);
+CREATE TABLE IF NOT EXISTS sat_utterance (
+    utterance_hk TEXT NOT NULL REFERENCES link_utterance(utterance_hk),
+    load_ts      TEXT NOT NULL,
+    load_end_ts  TEXT,
+    hash_diff    TEXT NOT NULL,
+    source_span  TEXT NOT NULL,          -- kept for audit; reconstruction never reads it
+    revision_id  INTEGER NOT NULL,
+    revision_ts  TEXT NOT NULL,
+    record_source TEXT NOT NULL,
+    PRIMARY KEY (utterance_hk, load_ts)
+);
+"""
+
+
+def _load_sentences(self, rev: Revision) -> tuple[int, int]:
+    """Store each prose sentence as pattern + slots. Reject what cannot be rebuilt."""
+    ts, src = rev.timestamp, rev.record_source
+    doc_hk = hk(rev.title)
+    stored = rejected = 0
+    occurrences: dict[str, int] = {}
+
+    for seq, raw in enumerate(sentences(rev.wikitext)):
+        try:
+            pattern, fillers, _ = roundtrip(raw)
+        except RoundTripError:
+            rejected += 1          # not regenerable -> not admitted
+            continue
+
+        pattern_hk = hk(pattern)
+        self.db.execute(
+            "INSERT OR IGNORE INTO hub_pattern"
+            " (pattern_hk, business_key, slot_count, load_ts, record_source) VALUES (?,?,?,?,?)",
+            (pattern_hk, pattern, len(fillers), ts, src),
+        )
+
+        # Identity is (document, frame, which use of that frame). Keyed on the
+        # pattern rather than the position so it survives edits elsewhere in the
+        # document; the occurrence index keeps a repeated frame distinct.
+        n = occurrences.get(pattern, 0)
+        occurrences[pattern] = n + 1
+        utterance_hk = hk(rev.title, pattern, str(n))
+        self.db.execute(
+            "INSERT OR IGNORE INTO link_utterance"
+            " (utterance_hk, doc_hk, pattern_hk, sequence, load_ts, record_source)"
+            " VALUES (?,?,?,?,?,?)",
+            (utterance_hk, doc_hk, pattern_hk, seq, ts, src),
+        )
+        for position, filler in enumerate(fillers):
+            entity_hk = self._hub("hub_entity", "entity_hk", filler, ts, src)
+            self.db.execute(
+                "INSERT OR REPLACE INTO link_slot (utterance_hk, position, entity_hk, surface)"
+                " VALUES (?,?,?,?)",
+                (utterance_hk, position, entity_hk, filler),
+            )
+
+        self._load_sat(
+            "sat_utterance", "utterance_hk", utterance_hk,
+            hashdiff(pattern, *fillers),
+            {"source_span": clean(raw)},
+            rev, ts, src,
+        )
+        stored += 1
+
+    return stored, rejected
+
+
+def reconstruct(self, subject: str) -> list[dict]:
+    """Rebuild every sentence of a document from hub_pattern + hub_entity.
+
+    Reads only the pattern hub and the slot links -- never sat_utterance.source_span
+    -- so a match against that column is a real verification, not a copy.
+    """
+    rows = self.db.execute(
+        """
+        SELECT u.utterance_hk, u.sequence, p.business_key AS pattern,
+               s.source_span, s.revision_id
+        FROM link_utterance u
+        JOIN hub_pattern p ON p.pattern_hk = u.pattern_hk
+        JOIN hub_entity d  ON d.entity_hk  = u.doc_hk
+        JOIN sat_utterance s ON s.utterance_hk = u.utterance_hk AND s.load_end_ts IS NULL
+        WHERE upper(d.business_key) = upper(?)
+        ORDER BY u.sequence
+        """,
+        (subject,),
+    ).fetchall()
+
+    out = []
+    for r in rows:
+        fillers = [
+            f[0] for f in self.db.execute(
+                "SELECT l.surface FROM link_slot l"
+                " JOIN hub_entity e ON e.entity_hk = l.entity_hk"
+                " WHERE l.utterance_hk = ? ORDER BY l.position",
+                (r["utterance_hk"],),
+            ).fetchall()
+        ]
+        rebuilt = construct(r["pattern"], fillers)
+        out.append({
+            "sequence": r["sequence"], "pattern": r["pattern"], "fillers": fillers,
+            "rebuilt": rebuilt, "original": r["source_span"],
+            "exact": rebuilt == r["source_span"], "revision_id": r["revision_id"],
+        })
+    return out
+
+
+Vault._load_sentences = _load_sentences
+Vault.reconstruct = reconstruct
