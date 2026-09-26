@@ -116,3 +116,20 @@ def test_the_verifier_rejects_a_claim_no_citation_supports():
     assert "microsoft" in ungrounded_tokens("Acme was founded by Microsoft.", facts)
     with pytest.raises(Grounding_Error):
         assert_grounded("Acme employs 5000 people.", facts)
+
+
+def test_a_second_entity_does_not_block_the_first(vault):
+    vault.load_revision(
+        rev(1, "2023-01-01T00:00:00Z", "| founders = Alice"),
+        [Fact("Acme", "founders", "Alice", "| founders = Alice")],
+    )
+    vault.load_revision(
+        Revision("Beta", 2, 2, "2023-01-01T00:00:00Z", "| founders = Bob"),
+        [Fact("Beta", "founders", "Bob", "| founders = Bob")],
+    )
+
+    answer = ask(vault, "who founded Acme")
+
+    assert not answer.refused
+    assert "Alice" in answer.text
+    assert {c["subject"] for c in answer.citations} == {"Acme"}
