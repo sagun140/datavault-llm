@@ -41,6 +41,47 @@ It also distinguishes **"I don't have that"** from **"here are related facts"**.
 a CTO the vault has never seen returns founders and key people *explicitly labelled as
 not an answer*, rather than letting adjacent truths pose as one.
 
+## The sentence creator: text -> vault -> the same text
+
+A sentence is stored as two constructs, and rebuilt from them:
+
+```
+hub_pattern    the frame, its entity mentions replaced by slots
+hub_entity     each filler, one hub per distinct entity
+link_slot      which hub fills which position, and how it was written there
+```
+
+The pattern is **derived from the input, never authored**. Wikipedia already marks its
+entities with `[[links]]` and bold markup, so the split between frame and filler is given
+by the source rather than guessed at:
+
+```
+$ dvl reconstruct Anthropic -v
+
+pattern: {0} (stylized as {1}) is an American {2} (AI) {3} headquartered in {4}, California.
+slots  : ['Anthropic, PBC', 'ANTHROP\C', 'artificial intelligence',
+          'public benefit corporation', 'San Francisco']
+rebuilt: Anthropic, PBC (stylized as ANTHROP\C) is an American artificial intelligence
+         (AI) public benefit corporation headquartered in San Francisco, California.
+
+157/157 sentences rebuilt exactly (100.0%)
+```
+
+`construct()` reads `hub_pattern` and `link_slot` only -- never
+`sat_utterance.source_span` -- so matching that column is a verification, not a copy.
+A sentence is admitted to the vault **only if `construct(decompose(s)) == s` exactly**, so
+the vault can regenerate every sentence it holds, character for character. What it cannot
+rebuild, it refuses to store.
+
+Two things this forced into the open:
+
+- **A mention is not an entity.** `artificial intelligence` and `Artificial intelligence`
+  are one hub but two surface forms, so the surface belongs on `link_slot` (the mention),
+  not on the hub (the identity). Getting this wrong cost 3 of 158 sentences.
+- **Utterance identity must survive edits.** Keying on (document, pattern) collided when
+  one document used a frame twice; it now includes the occurrence index, which stays
+  stable when unrelated sentences change.
+
 ## Sentences are walked out of the graph
 
 A link is already a proposition: `hub(subject) -> predicate -> satellite(value)` maps
@@ -140,9 +181,13 @@ so the graph is intact.
 
 ## Honest limitations
 
-- **Coverage is narrow.** Infobox + lead sentence only; body prose is not extracted, so
-  most of a page's content never reaches the vault. Broad coverage is the main thing
-  standing between this and something useful.
+- **39% of sentences round-trip vacuously.** 60 of 155 contain no wikilink, so they
+  become a zero-slot pattern: the whole sentence stored as one frozen string. Those are
+  memorized, not decomposed, and the vault gains no structure from them. Decomposition
+  depends entirely on the source's own markup; unlinked prose yields nothing.
+- **Facts are still infobox + lead sentence only.** Sentence storage now covers the whole
+  page, but the fact extractor that `ask` queries does not, so most body prose is
+  reconstructable without being answerable.
 - **Retrieval is lexical**, with a hand-written synonym table. It has no notion of
   paraphrase; an unmapped question word simply fails to retrieve, and it refuses. That
   fails safe, but it fails often.
