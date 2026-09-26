@@ -155,6 +155,29 @@ def ask(vault: Vault, question: str, top_k: int = 3) -> Answer:
     facts = {h.row["predicate"]: h.row["value"] for h in hits}
     by_predicate = {h.row["predicate"]: h.row for h in hits}
 
+    # If sources disagree on a retrieved slot, report the disagreement rather
+    # than narrating whichever row sorted first.
+    conflicts = {
+        (c["subject"], c["predicate"]): c
+        for c in vault.contradictions()
+    }
+    clash = [conflicts[(subject, p)] for p in facts if (subject, p) in conflicts]
+    if clash:
+        lines = ["Sources in the vault disagree, so there is no single answer:"]
+        cits = []
+        for c in clash:
+            for claim in c["claims"]:
+                lines.append(
+                    f"  · {c['subject']} / {c['predicate']} = {claim['value']!r}"
+                    f"   (per {claim['lineage']}, rev {claim['revision_id']})"
+                )
+                cits.append({
+                    "subject": c["subject"], "predicate": c["predicate"],
+                    "value": claim["value"], "revision_id": claim["revision_id"],
+                    "revision_ts": "", "record_source": claim["record_source"],
+                })
+        return Answer("\n".join(lines), cits, refused=True)
+
     citations, parts = [], []
     for sentence, predicates in describe(subject, facts):
         for p in predicates:

@@ -141,6 +141,43 @@ Anthropic / products
 Loads are idempotent (same content twice = one satellite row) and order-safe (an older
 revision loaded late never overwrites newer history).
 
+## Front end
+
+```bash
+python3 -m dvl.cli ingest "Anthropic" --asof 2023-06-01T00:00:00Z --asof 2026-09-25T00:00:00Z
+python3 -m dvl.cli ingest "Nepal"
+python3 -m dvl.cli ingest "Ada Lovelace"
+python3 -m dvl.cli serve            # http://localhost:8000
+```
+
+Five tabs, all reading the live vault:
+
+- **Ask** -- question, answer, and **token provenance**: every word coloured by the construct
+  it came from, with a running "% of tokens that came from the vault". Plus the retrieval
+  trace showing each candidate row's score and whether it passed the gate. Sample questions
+  are pre-verified; the dashed ones are questions the vault genuinely cannot answer.
+- **Vault** -- pages loaded, table counts, and a browser over every hub, link and satellite.
+- **Sentences** -- each stored sentence rebuilt from `hub_pattern` + `link_slot`, with the
+  pattern and its fillers shown.
+- **Generate** -- text about an entity, assembled from attested bindings only.
+- **Updates & conflicts** -- see below.
+
+### Updates vs conflicts
+
+These are different events and the vault treats them differently:
+
+| | what it means | what happens |
+|---|---|---|
+| Same document, later revision | the value was **updated** | old satellite row end-dated, new one opened; `dvl history` shows the transition |
+| Different document, different value | the sources **disagree** | both rows stay open, the slot is flagged, and `ask` reports the disagreement instead of picking a side |
+
+Collapsing the second case into the first would make the vault assert whichever page happened
+to be loaded last. The satellite therefore carries a `lineage` column, and supersession only
+applies within one lineage.
+
+Note: the three demo pages do not assert about the same subject, so the conflicts panel is
+legitimately empty. The mechanism is covered by `tests/test_conflict.py`.
+
 ## Verified across pages
 
 From a clean clone, ingesting live:

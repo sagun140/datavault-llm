@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>datavault-llm</title>
+<style>
+:root{--bg:#0f1115;--panel:#161922;--line:#262b38;--fg:#e6e9ef;--dim:#8b93a7;--acc:#5b9dff;
+--hub:#4ade80;--sat:#fbbf24;--pred:#a78bfa;--pat:#38bdf8;--scaf:#6b7280;--bad:#f87171;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--dim);font-size:12.5px}
+nav{display:flex;gap:4px;padding:10px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+nav button{background:none;border:1px solid transparent;color:var(--dim);padding:6px 13px;border-radius:7px;cursor:pointer;font:inherit;font-size:13px}
+nav button:hover{color:var(--fg)}
+nav button.on{background:var(--panel);border-color:var(--line);color:var(--fg)}
+main{padding:20px 22px;max-width:1180px}
+section{display:none} section.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:13px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+input[type=text],select{background:#0b0d12;border:1px solid var(--line);color:var(--fg);padding:11px 13px;border-radius:8px;font:inherit;width:100%}
+button.go{background:var(--acc);border:0;color:#05080f;font-weight:600;padding:11px 18px;border-radius:8px;cursor:pointer;font:inherit;font-weight:600}
+.row{display:flex;gap:9px}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.chip{background:#0b0d12;border:1px solid var(--line);color:var(--dim);padding:5px 11px;border-radius:99px;cursor:pointer;font-size:12.5px}
+.chip:hover{border-color:var(--acc);color:var(--fg)}
+.chip.neg{border-style:dashed}
+.answer{font-size:16.5px;line-height:1.75;white-space:pre-wrap}
+.refused{color:var(--bad)}
+.tok{border-radius:3px;padding:1px 0;border-bottom:2px solid transparent}
+.o-hub{color:var(--hub);border-color:var(--hub)}
+.o-satellite{color:var(--sat);border-color:var(--sat)}
+.o-predicate{color:var(--pred);border-color:var(--pred)}
+.o-pattern{color:var(--pat);border-color:var(--pat)}
+.o-scaffold{color:var(--scaf)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:12px}
+.legend b{font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;color:var(--dim);font-weight:600;border-bottom:1px solid var(--line);padding:7px 9px;position:sticky;top:0;background:var(--panel)}
+td{padding:6px 9px;border-bottom:1px solid #1d212c;vertical-align:top}
+td.mono,th.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--dim)}
+.scroll{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.pass{color:var(--hub)} .fail{color:var(--dim);opacity:.55}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:12px}
+.stat b{display:block;font-size:21px;font-weight:600}
+.stat span{color:var(--dim);font-size:11.5px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.pat{color:var(--pat);font-family:ui-monospace,Menlo,monospace;font-size:12.5px;word-break:break-word}
+.arrow{color:var(--dim)}
+.was{color:var(--bad);text-decoration:line-through;opacity:.8}
+.now{color:var(--hub)}
+.note{color:var(--dim);font-size:12.5px;margin:-4px 0 12px}
+.err{color:var(--bad)}
+</style></head><body>
+<header>
+  <h1>datavault-llm</h1>
+  <span class="sub">answers assembled from a Data Vault — retrieval, not generation</span>
+</header>
+<nav id="nav"></nav>
+<main>
+  <section id="s-ask" class="on">
+    <div class="card">
+      <div class="row"><input type="text" id="q" placeholder="Ask the vault…" autocomplete="off">
+      <button class="go" onclick="doAsk()">Ask</button></div>
+      <div class="chips" id="samples"></div>
+    </div>
+    <div class="card"><h3>Answer</h3><div id="ans" class="answer">—</div></div>
+    <div class="card"><h3>Token provenance — where every word came from</h3>
+      <div id="prov" class="answer"></div>
+      <div class="legend">
+        <span class="o-hub"><b>hub</b> hub_entity.business_key</span>
+        <span class="o-satellite"><b>satellite</b> sat_statement.value</span>
+        <span class="o-predicate"><b>predicate</b> hub_predicate.business_key</span>
+        <span class="o-pattern"><b>pattern</b> hub_pattern.business_key</span>
+        <span class="o-scaffold"><b>scaffold</b> closed-class word (the only non-vault source)</span>
+      </div>
+      <div id="counts" class="note" style="margin-top:10px"></div>
+    </div>
+    <div class="card"><h3>Retrieval trace</h3><div id="tracehead" class="note"></div>
+      <div class="scroll"><table id="trace"></table></div></div>
+    <div class="card"><h3>Citations</h3><div id="cites" class="mono" style="font-size:12px"></div></div>
+  </section>
+
+  <section id="s-vault">
+    <div class="card"><h3>Pages loaded</h3><div class="scroll"><table id="pages"></table></div></div>
+    <div class="card"><h3>Vault size</h3><div class="grid" id="stats"></div></div>
+    <div class="card"><h3>Browse tables</h3>
+      <select id="tbl" onchange="loadTable()">
+        <option>hub_entity</option><option>hub_predicate</option><option>hub_pattern</option>
+        <option>link_statement</option><option>link_slot</option><option>sat_statement</option>
+      </select>
+      <div class="note" id="tblnote"></div>
+      <div class="scroll"><table id="table"></table></div></div>
+  </section>
+
+  <section id="s-sent">
+    <div class="card"><h3>Reconstruct sentences from constructs</h3>
+      <div class="row"><input type="text" id="ent" placeholder="Entity, e.g. Anthropic">
+      <button class="go" onclick="loadSentences()">Rebuild</button></div>
+      <div class="note" id="sentnote" style="margin-top:10px"></div></div>
+    <div id="sentences"></div>
+  </section>
+
+  <section id="s-gen">
+    <div class="card"><h3>Generate text about an entity</h3>
+      <div class="row"><input type="text" id="gent" placeholder="Entity, e.g. Anthropic">
+      <button class="go" onclick="loadGen()">Generate</button></div>
+      <div class="note">Generation selects and orders <b>attested</b> bindings. It never rebinds a
+      pattern to different fillers — that would read fluently and assert something no source said.</div>
+    </div>
+    <div class="card"><h3>Output</h3><div id="gen" class="answer"></div>
+      <div id="gencounts" class="note" style="margin-top:12px"></div></div>
+  </section>
+
+  <section id="s-change">
+    <div class="card"><h3>Tracked updates</h3>
+      <div class="note">A later revision of the <b>same</b> document supersedes: the old satellite row is
+      end-dated, the new one opens. Nothing is overwritten.</div>
+      <div class="scroll"><table id="updates"></table></div></div>
+    <div class="card"><h3>Conflicting information</h3>
+      <div class="note">A <b>different</b> document asserting something else is not an update — both rows
+      stay open and the slot is flagged. Asked about a flagged slot, the system reports the disagreement
+      instead of picking a side.</div>
+      <div id="conflicts"></div></div>
+  </section>
+</main>
+<script>
+// Verified against the shipped vault: each answered question was run and its
+// answer checked; each "refuse" chip is a question the vault genuinely cannot answer.
+window.SAMPLE_QS=[
+ ["who founded anthropic","ok"],
+ ["how many employees does anthropic have","ok"],
+ ["what is anthropic revenue","ok"],
+ ["what products does anthropic make","ok"],
+ ["what is the capital of nepal","ok"],
+ ["what is the population of nepal","ok"],
+ ["what currency does nepal use","ok"],
+ ["when was ada lovelace born","ok"],
+ ["what changed about anthropic","ok"],
+ ["what is anthropic stock price","refuse"],
+ ["who is the cto of anthropic","refuse"],
+ ["how many moons does nepal have","refuse"],
+];
+const TABS=[["ask","Ask"],["vault","Vault"],["sent","Sentences"],["gen","Generate"],["change","Updates & conflicts"]];
+const nav=document.getElementById("nav");
+TABS.forEach(([id,label],i)=>{const b=document.createElement("button");b.textContent=label;
+  b.className=i?"":"on";b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.className="");
+  b.className="on";document.querySelectorAll("section").forEach(s=>s.className="");
+  document.getElementById("s-"+id).className="on";};nav.appendChild(b);});
+
+const j=u=>fetch(u).then(r=>r.json());
+const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function tbl(el,cols,rows){el.innerHTML="<tr>"+cols.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>"+
+  rows.map(r=>"<tr>"+r.map(c=>`<td class="mono">${esc(c)}</td>`).join("")+"</tr>").join("");}
+
+const SAMPLES=[];
+async function boot(){
+  const o=await j("/api/overview");
+  tbl(document.getElementById("pages"),["title","revision","as of","sentences"],
+      o.pages.map(p=>[p.title,p.revision_id,p.revision_ts,p.sentences]));
+  document.getElementById("stats").innerHTML=Object.entries(o.stats)
+    .map(([k,v])=>`<div class="stat"><b>${v}</b><span>${esc(k)}</span></div>`).join("")+
+    `<div class="stat"><b>${o.updates}</b><span>tracked updates</span></div>`+
+    `<div class="stat"><b>${o.conflicts}</b><span>conflicting slots</span></div>`;
+  if(o.pages[0]){document.getElementById("ent").value=o.pages[0].title;
+                 document.getElementById("gent").value=o.pages[0].title;}
+  loadTable();loadUpdates();
+  const chips=document.getElementById("samples");
+  (window.SAMPLE_QS||[]).forEach(([q,kind])=>{const c=document.createElement("span");
+    c.className="chip"+(kind==="refuse"?" neg":"");c.textContent=q;
+    c.onclick=()=>{document.getElementById("q").value=q;doAsk();};chips.appendChild(c);});
+}
+function segHTML(segs){return segs.map(s=>
+  `<span class="tok o-${s.origin}" title="${esc(s.origin)} — ${esc(s.detail)}">${esc(s.text)}</span>`).join("");}
+
+async function doAsk(){
+  const q=document.getElementById("q").value.trim(); if(!q)return;
+  const d=await j("/api/ask?q="+encodeURIComponent(q));
+  if(d.error){document.getElementById("ans").innerHTML=`<span class="err">${esc(d.error)}</span>`;return;}
+  document.getElementById("ans").innerHTML=`<span class="${d.refused?'refused':''}">${esc(d.text)}</span>`;
+  document.getElementById("prov").innerHTML=d.segments.length
+    ? d.segments.map(segHTML).join(" ")
+    : '<span class="o-scaffold">— no answer composed, so no tokens were emitted</span>';
+  const c={};d.segments.flat().forEach(s=>{(s.text.match(/[a-z0-9]+/gi)||[]).forEach(()=>c[s.origin]=(c[s.origin]||0)+1);});
+  const tot=Object.values(c).reduce((a,b)=>a+b,0);
+  document.getElementById("counts").innerHTML=tot?Object.entries(c)
+    .map(([k,v])=>`<span class="o-${k}">${k}: ${v}</span>`).join(" &nbsp;·&nbsp; ")+
+    ` &nbsp;·&nbsp; ${Math.round(100*(tot-(c.scaffold||0))/tot)}% of tokens came from the vault`:"";
+  const t=d.trace;
+  document.getElementById("tracehead").innerHTML=
+    `content tokens <b class="mono">${esc(t.content.join(", ")||"—")}</b> · wh-word <b class="mono">${esc(t.wh||"none")}</b> · gate needs predicate ≥ ${t.threshold}`;
+  tbl(document.getElementById("trace"),["predicate","lexical","pred score","total","gate","value"],
+      t.rows.map(r=>[r.subject+" / "+r.predicate,r.lexical,r.predicate_score,r.total,r.passed?"PASS":"reject",r.value]));
+  document.querySelectorAll("#trace tr").forEach((tr,i)=>{if(i>0&&t.rows[i-1])
+    tr.className=t.rows[i-1].passed?"pass":"fail";});
+  document.getElementById("cites").innerHTML=d.citations.length?d.citations.map((c,i)=>
+    `[${i+1}] ${esc(c.subject)} / ${esc(c.predicate)} = ${esc(c.value)}<br>&nbsp;&nbsp;&nbsp;&nbsp;rev ${esc(c.revision_id)} · ${esc(c.record_source)}`).join("<br>"):"—";
+}
+async function loadTable(){
+  const n=document.getElementById("tbl").value;
+  const d=await j("/api/table?name="+n);
+  document.getElementById("tblnote").textContent=`${d.total} rows`+(d.total>400?" (showing first 400)":"");
+  tbl(document.getElementById("table"),d.columns,d.rows);
+}
+async function loadSentences(){
+  const e=document.getElementById("ent").value.trim();
+  const d=await j("/api/sentences?entity="+encodeURIComponent(e));
+  document.getElementById("sentnote").innerHTML=
+    `${d.exact}/${d.count} rebuilt exactly from hub_pattern + link_slot`;
+  document.getElementById("sentences").innerHTML=d.sentences.map(s=>`
+    <div class="card"><div class="pat">${esc(s.pattern)}</div>
+    <div class="note" style="margin:8px 0">${s.fillers.map((f,i)=>
+      `<span class="o-hub mono">{${i}}</span>=${esc(f)}`).join(" &nbsp; ")}</div>
+    <div class="answer">${segHTML(s.segments)}</div>
+    <div class="note" style="margin-top:8px">${s.exact?"✓ identical to source":"✗ differs from source"}</div></div>`).join("");
+}
+async function loadGen(){
+  const e=document.getElementById("gent").value.trim();
+  const d=await j("/api/generate?entity="+encodeURIComponent(e));
+  document.getElementById("gen").innerHTML=d.sentences.map(s=>
+    `<div style="margin-bottom:12px">${segHTML(s.segments)}
+     <div class="note" style="margin-top:3px">${esc(s.kind)} · ${esc(s.cites.join("; "))}</div></div>`).join("");
+  const tot=Object.values(d.counts).reduce((a,b)=>a+b,0);
+  document.getElementById("gencounts").innerHTML=Object.entries(d.counts)
+    .map(([k,v])=>`<span class="o-${k}">${k}: ${v}</span>`).join(" &nbsp;·&nbsp; ")+
+    ` &nbsp;·&nbsp; <b>${Math.round(100*(tot-(d.counts.scaffold||0))/tot)}%</b> of tokens came from the vault`;
+}
+async function loadUpdates(){
+  const u=await j("/api/updates");
+  tbl(document.getElementById("updates"),["subject","predicate","was","now","superseded"],
+      u.updates.map(r=>[r.subject,r.predicate,r.old_value,r.new_value,r.superseded_at]));
+  const c=await j("/api/conflicts");
+  document.getElementById("conflicts").innerHTML=c.conflicts.length?c.conflicts.map(x=>
+    `<div style="margin-bottom:10px"><b>${esc(x.subject)} / ${esc(x.predicate)}</b>${
+      x.claims.map(cl=>`<div class="mono" style="font-size:12px;color:var(--dim)">&nbsp;&nbsp;· ${esc(cl.value)} <span class="arrow">— per ${esc(cl.lineage)}, rev ${esc(cl.revision_id)}</span></div>`).join("")
+    }</div>`).join(""):'<div class="note">No slot currently has disagreeing sources.</div>';
+}
+boot();
+</script></body></html>

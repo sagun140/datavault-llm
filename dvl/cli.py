@@ -75,6 +75,11 @@ def cmd_history(args):
     vault.close()
 
 
+def cmd_serve(args):
+    from .server import serve
+    serve(args.db, args.port)
+
+
 def cmd_stats(args):
     vault = Vault(args.db)
     for k, v in vault.stats().items():
@@ -109,6 +114,10 @@ def main(argv=None):
     h = sub.add_parser("history", help="show values the vault has superseded")
     h.add_argument("subject", nargs="?")
     h.set_defaults(func=cmd_history)
+
+    w = sub.add_parser("serve", help="run the local web front end")
+    w.add_argument("--port", type=int, default=8000)
+    w.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("stats", help="vault contents by table")
     s.set_defaults(func=cmd_stats)

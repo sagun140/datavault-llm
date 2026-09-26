@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS sat_statement (
     revision_id  INTEGER NOT NULL,
     revision_ts  TEXT NOT NULL,
     record_source TEXT NOT NULL,
+    -- Which document this assertion came from. A later revision of the SAME
+    -- document supersedes (an update); a DIFFERENT document asserting something
+    -- else does not (a contradiction), so both stay open and get flagged.
+    lineage      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (statement_hk, load_ts)
 );
 CREATE TABLE IF NOT EXISTS sat_entity (
@@ -175,7 +179,7 @@ class Vault:
                     "object_entity_hk": object_hk,
                     "source_span": fact.source_span,
                 },
-                rev, ts, src,
+                rev, ts, src, lineage=rev.title,
             )
             setattr(rep, outcome, getattr(rep, outcome) + 1)
 
@@ -183,12 +187,21 @@ class Vault:
         self.db.commit()
         return rep
 
-    def _load_sat(self, table, key_col, key, hash_diff, cols, rev, ts, src) -> str:
-        """Type-2 upsert: no-op if unchanged, else end-date the open row and insert."""
+    def _load_sat(self, table, key_col, key, hash_diff, cols, rev, ts, src, lineage=None) -> str:
+        """Type-2 upsert, lineage-aware.
+
+        Same document, later revision -> the value was updated: end-date and insert.
+        Different document, different value -> the sources disagree: both stay open
+        and `contradictions()` reports the slot. Silently end-dating here would
+        make the vault assert whichever page was loaded last.
+        """
+        has_lineage = table == "sat_statement"
+        where = f" AND lineage=?" if has_lineage else ""
+        params = (key, lineage) if has_lineage else (key,)
         cur = self.db.execute(
             f"SELECT hash_diff, load_ts FROM {table}"
-            f" WHERE {key_col}=? AND load_end_ts IS NULL",
-            (key,),
+            f" WHERE {key_col}=? AND load_end_ts IS NULL{where}",
+            params,
         ).fetchone()
 
         if cur and cur["hash_diff"] == hash_diff:
@@ -199,13 +212,16 @@ class Vault:
             if ts <= cur["load_ts"]:
                 return "unchanged"  # out-of-order load: never rewrite newer history
             self.db.execute(
-                f"UPDATE {table} SET load_end_ts=? WHERE {key_col}=? AND load_end_ts IS NULL",
-                (ts, key),
+                f"UPDATE {table} SET load_end_ts=? WHERE {key_col}=? AND load_end_ts IS NULL{where}",
+                (ts, key, lineage) if has_lineage else (ts, key),
             )
             outcome = "changed"
 
         names = [key_col, "load_ts", "hash_diff", *cols, "revision_id", "revision_ts", "record_source"]
         values = [key, ts, hash_diff, *cols.values(), rev.revid, rev.timestamp, src]
+        if has_lineage:
+            names.append("lineage")
+            values.append(lineage)
         self.db.execute(
             f"INSERT INTO {table} ({','.join(names)})"
             f" VALUES ({','.join('?' * len(names))})",
@@ -250,6 +266,33 @@ class Vault:
             sql += " AND upper(e.business_key) = upper(?)"
             params = (subject,)
         return self.db.execute(sql + " ORDER BY old.load_end_ts DESC", params).fetchall()
+
+    def contradictions(self) -> list[dict]:
+        """Slots where sources currently disagree. Not history -- live conflict."""
+        rows = self.db.execute(
+            """
+            SELECT e.business_key AS subject, p.business_key AS predicate,
+                   s.value, s.lineage, s.record_source, s.revision_id
+            FROM sat_statement s
+            JOIN link_statement l ON l.statement_hk = s.statement_hk
+            JOIN hub_entity e     ON e.entity_hk    = l.subject_hk
+            JOIN hub_predicate p  ON p.predicate_hk = l.predicate_hk
+            WHERE s.load_end_ts IS NULL
+              AND s.statement_hk IN (
+                  SELECT statement_hk FROM sat_statement
+                  WHERE load_end_ts IS NULL
+                  GROUP BY statement_hk HAVING count(DISTINCT value) > 1
+              )
+            ORDER BY e.business_key, p.business_key, s.lineage
+            """
+        ).fetchall()
+        grouped: dict[tuple, list] = {}
+        for r in rows:
+            grouped.setdefault((r["subject"], r["predicate"]), []).append(dict(r))
+        return [
+            {"subject": k[0], "predicate": k[1], "claims": v}
+            for k, v in grouped.items()
+        ]
 
     def stats(self) -> dict:
         one = lambda q: self.db.execute(q).fetchone()[0]
