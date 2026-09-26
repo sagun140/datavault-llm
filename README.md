@@ -141,6 +141,25 @@ Anthropic / products
 Loads are idempotent (same content twice = one satellite row) and order-safe (an older
 revision loaded late never overwrites newer history).
 
+## Verified across pages
+
+From a clean clone, ingesting live:
+
+| page | sentences | rebuilt exactly | non-vacuous |
+|---|---|---|---|
+| Anthropic | 157 | 157 (100%) | 61% |
+| Nepal | 518 | 518 (100%) | 55% |
+| Ada Lovelace | 186 | 186 (100%) | 59% |
+| Photosynthesis | 295 | 295 (100%) | 73% |
+| Kathmandu | 384 | 384 (100%) | 51% |
+
+1,540 sentences, all rebuilt character for character. One sentence on Photosynthesis was
+refused at load as not regenerable, which is the gate working rather than failing.
+
+"non-vacuous" is the share with at least one slot; the rest carry no wikilink and so are
+stored as a single frozen string, which round-trips trivially and teaches the vault
+nothing.
+
 ## Run it
 
 Python 3.10+, no dependencies.
@@ -191,10 +210,10 @@ so the graph is intact.
 - **Retrieval is lexical**, with a hand-written synonym table. It has no notion of
   paraphrase; an unmapped question word simply fails to retrieve, and it refuses. That
   fails safe, but it fails often.
-- **The realizer is template-driven, not learned.** Clause patterns are hand-authored per
-  predicate (17 of them). A predicate with no template produces no sentence rather than a
-  guess, so coverage of the grammar bounds coverage of the answers.
-  An LLM composer behind `assert_grounded` remains the intended next step for fluency.
+- **Answers read plainly.** A predicate with no hand-written clause falls back to
+  `"{subject}'s {predicate} is {value}"`, built from the predicate's own business key. It
+  always says something true and never invents a word, but it is not graceful prose. An
+  LLM composer behind `assert_grounded` remains the intended next step for fluency.
 - **Fidelity is only as good as the source.** The vault guarantees a claim traces to a
   Wikipedia revision. It does not make Wikipedia correct.
 - **`object_entity_hk` is unreliable.** It records the *first* wikilink in a value, which

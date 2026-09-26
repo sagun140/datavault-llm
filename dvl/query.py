@@ -162,6 +162,12 @@ def ask(vault: Vault, question: str, top_k: int = 3) -> Answer:
             row["lexicalization"] = lexicalization(p, CLAUSES.get(p, ""))
             citations.append(row)
         parts.append(f"{sentence} [{len(citations)}]")
+    if not parts:
+        return Answer(
+            "The vault holds facts for that, but cannot render any of them as a "
+            "sentence, so it will not answer.",
+            refused=True,
+        )
     text = " ".join(parts)
     assert_grounded(text, citations)  # raises rather than emit an unsupported claim
 

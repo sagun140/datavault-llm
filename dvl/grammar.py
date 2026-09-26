@@ -98,11 +98,23 @@ def _article(obj: str) -> str:
     return "an" if obj[:1].lower() in "aeiou" else "a"
 
 
+def generic(predicate: str) -> str:
+    """Fallback clause built from the predicate's own business key.
+
+    Satisfies the closure invariant by construction: every content word in it IS
+    the predicate. This is what keeps grammar coverage from capping answer
+    coverage -- an unseen predicate still gets a sentence, just a plainer one.
+    """
+    words = predicate.replace("_", " ").strip()
+    copula = "are" if words.endswith("s") and not words.endswith("ss") else "is"
+    return "{possessive} " + words + " " + copula + " {object}"
+
+
 def realize(subject: str, predicate: str, value: str) -> str | None:
     """One link + its satellite -> one clause."""
-    template = CLAUSES.get(predicate)
-    if not template:
+    if not predicate or not value:
         return None
+    template = CLAUSES.get(predicate) or generic(predicate)
     obj = coordinate(value)
     return template.format(
         subject=subject, possessive=_possessive(subject),

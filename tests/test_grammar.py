@@ -11,7 +11,7 @@ SLOT = re.compile(r"\{[^}]*\}")
 
 
 def template_words(template: str) -> list[str]:
-    return re.findall(r"[a-z]+", SLOT.sub(" ", template.lower()))
+    return re.findall(r"[a-z0-9]+", SLOT.sub(" ", template.lower()))
 
 
 @pytest.mark.parametrize("predicate,template", sorted(CLAUSES.items()))
@@ -61,8 +61,14 @@ def test_the_subject_is_pronominalized_after_first_mention():
     assert sentences[1][0].startswith("Its revenue")  # not "It's"
 
 
-def test_an_unknown_predicate_yields_no_sentence_rather_than_a_guess():
-    assert realize("Acme", "shoe_size", "11") is None
+def test_an_unknown_predicate_yields_a_sentence_with_no_invented_word():
+    """Previously this returned None, silently dropping the fact."""
+    out = realize("Acme", "shoe_size", "11")
+
+    assert out == "Acme's shoe size is 11"
+    allowed = stems("shoe_size") | {w[:3] for w in ("acme", "11")}
+    for word in template_words(out):
+        assert word in SCAFFOLD or word[:3] in allowed
 
 
 def test_generated_sentences_pass_the_grounding_gate():
@@ -75,3 +81,24 @@ def test_generated_sentences_pass_the_grounding_gate():
     text = " ".join(s for s, _ in describe("Acme", facts))
 
     assert ungrounded_tokens(text, cited) == []
+
+
+@pytest.mark.parametrize("predicate", ["capital", "population", "currency", "area_km2", "products"])
+def test_the_generic_clause_introduces_no_content_word_either(predicate):
+    from dvl.grammar import generic
+
+    allowed = stems(predicate)
+    for word in template_words(generic(predicate)):
+        assert word in SCAFFOLD or word[:3] in allowed
+
+
+def test_an_untemplated_predicate_still_yields_a_sentence():
+    """Grammar coverage must not silently cap answer coverage."""
+    assert realize("Nepal", "capital", "Kathmandu") == "Nepal's capital is Kathmandu"
+    assert realize("Nepal", "official_languages", "Nepali") == (
+        "Nepal's official languages are Nepali"
+    )
+
+
+def test_an_empty_value_yields_no_sentence():
+    assert realize("Nepal", "capital", "") is None
