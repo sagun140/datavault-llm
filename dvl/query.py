@@ -151,6 +151,7 @@ def ask(vault: Vault, question: str, top_k: int = 3) -> Answer:
     # Compose by walking the graph: the retrieved links become clauses, and
     # co-occurring links on the same hub fuse into one sentence.
     subject = hits[0].row["subject"]
+    hits = [h for h in hits if h.row["subject"] == subject]
     facts = {h.row["predicate"]: h.row["value"] for h in hits}
     by_predicate = {h.row["predicate"]: h.row for h in hits}
 
